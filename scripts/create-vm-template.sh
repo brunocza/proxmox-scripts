@@ -7,6 +7,7 @@ proxmoxTemplateName="${TMPL_NAME:-ubuntu-2204}"
 scriptTmpPath=/tmp/proxmox-scripts
 
 
+
 init () {
     [ $(id -u) == 0 ] && apt-get update && apt-get install sudo -y || exit 1
     clean
