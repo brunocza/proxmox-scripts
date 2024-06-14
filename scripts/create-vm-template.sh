@@ -1,6 +1,4 @@
 #!/bin/bash
-
-# Variáveis
 ubuntuImageURL=https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img
 ubuntuImageFilename=$(basename $ubuntuImageURL)
 ubuntuImageBaseURL=$(dirname $ubuntuImageURL)
@@ -8,8 +6,6 @@ proxmoxTemplateID="${TMPL_ID:-9000}"
 proxmoxTemplateName="${TMPL_NAME:-ubuntu-2204}"
 scriptTmpPath=/tmp/proxmox-scripts
 imageSavePath=/opt/proxmox-images  # Caminho específico para salvar a imagem
-
-# Funções
 
 init () {
     [ $(id -u) == 0 ] && apt-get update && apt-get install sudo -y || exit 1
@@ -58,15 +54,12 @@ resetMachineID () {
 createProxmoxVMTemplate () {
     sudo qm destroy $proxmoxTemplateID --purge || true
     sudo qm create $proxmoxTemplateID --name $proxmoxTemplateName --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0
-    
-    sudo qm set $proxmoxTemplateID --net1 virtio,bridge=vmbr0
-    sudo qm set $proxmoxTemplateID --scsihw virtio-scsi-pci --scsi0 local-lvm:vm-9000-disk-0
+    sudo qm set $proxmoxTemplateID --scsihw virtio-scsi-single 
     sudo qm set $proxmoxTemplateID --virtio0 $vmDiskStorage:0,import-from=$scriptTmpPath/$ubuntuImageFilename
-    sudo qm set $proxmoxTemplateID --boot order=scsi0 --bootdisk virtio0
+    sudo qm set $proxmoxTemplateID --boot c --bootdisk virtio0
+    sudo qm set $proxmoxTemplateID --ide2 $vmDiskStorage:cloudinit
     sudo qm set $proxmoxTemplateID --serial0 socket --vga serial0
     sudo qm set $proxmoxTemplateID --agent enabled=1,fstrim_cloned_disks=1
-    sudo qm set $proxmoxTemplateID --ide2 local-lvm:cloudinit 
-
     sudo qm template $proxmoxTemplateID
 }
 
@@ -74,7 +67,6 @@ clean () {
     rm -rf $scriptTmpPath 
 }
 
-# Execução
 init
 getImage
 enableCPUHotplug
