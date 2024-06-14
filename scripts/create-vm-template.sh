@@ -8,7 +8,12 @@ scriptTmpPath=/tmp/proxmox-scripts
 imageSavePath=/opt/proxmox-images  # Caminho específico para salvar a imagem
 
 init () {
-    [ $(id -u) == 0 ] && apt-get update && apt-get install sudo -y || exit 1
+    if [ $(id -u) != 0 ]; then
+        echo "Este script deve ser executado como root." >&2
+        exit 1
+    fi
+
+    apt-get update && apt-get install sudo -y
     clean
     installRequirements
     mkdir -p $scriptTmpPath
@@ -26,10 +31,16 @@ getImage () {
     local _img=$imageSavePath/$ubuntuImageFilename
     local imgSHA256SUM=$(curl -s $ubuntuImageBaseURL/SHA256SUMS | grep $ubuntuImageFilename | awk '{print $1}')
     
-    if [ -f "$_img" ] && [[ $(sha256sum $_img | awk '{print $1}') == $imgSHA256SUM ]]
-    then
-        echo "The image file exists and the signature is OK"
+    if [ -f "$_img" ]; then
+        echo "Verificando integridade da imagem existente..."
+        if [[ $(sha256sum $_img | awk '{print $1}') == $imgSHA256SUM ]]; then
+            echo "A imagem já existe e a assinatura está OK."
+        else
+            echo "A imagem existente está corrompida. Baixando novamente..."
+            wget $ubuntuImageURL -O $_img
+        fi
     else
+        echo "Baixando a imagem do Ubuntu..."
         wget $ubuntuImageURL -O $_img
     fi
 
@@ -37,21 +48,31 @@ getImage () {
 }
 
 enableCPUHotplug () {
+    echo "Habilitando hotplug de CPU..."
     sudo virt-customize -a $scriptTmpPath/$ubuntuImageFilename \
     --run-command 'echo "SUBSYSTEM==\"cpu\", ACTION==\"add\", TEST==\"online\", ATTR{online}==\"0\", ATTR{online}=\"1\"" > /lib/udev/rules.d/80-hotplug-cpu.rules' 
 }
 
 installQemuGA () {
+    echo "Instalando QEMU Guest Agent..."
     sudo virt-customize -a $scriptTmpPath/$ubuntuImageFilename \
-    --run-command 'sudo apt update -y && sudo apt install qemu-guest-agent -y && sudo systemctl start qemu-guest-agent'
+    --run-command 'apt update -y && apt install qemu-guest-agent -y && systemctl enable qemu-guest-agent && systemctl start qemu-guest-agent'
 }
 
 resetMachineID () {
+    echo "Resetando o ID da máquina..."
     sudo virt-customize -x -a $scriptTmpPath/$ubuntuImageFilename \
-    --run-command 'sudo echo -n >/etc/machine-id'
+    --run-command '> /etc/machine-id && systemd-machine-id-setup'
+}
+
+setRandomSeed () {
+    echo "Definindo a semente aleatória..."
+    sudo virt-customize -a $scriptTmpPath/$ubuntuImageFilename \
+    --run-command 'mkdir -p /var/lib/systemd && dd if=/dev/urandom of=/var/lib/systemd/random-seed bs=512 count=1 && chmod 600 /var/lib/systemd/random-seed'
 }
 
 createProxmoxVMTemplate () {
+    echo "Criando template de VM no Proxmox..."
     sudo qm destroy $proxmoxTemplateID --purge || true
     sudo qm create $proxmoxTemplateID --name $proxmoxTemplateName --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0
     sudo qm set $proxmoxTemplateID --scsihw virtio-scsi-single 
@@ -72,5 +93,6 @@ getImage
 enableCPUHotplug
 installQemuGA
 resetMachineID
+setRandomSeed
 createProxmoxVMTemplate
 clean
